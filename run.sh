@@ -13,5 +13,6 @@ database=$(readlink -f "$2")
 docker run -v "$video:/video" -v "$database:/database" video_face_recognition
 
 input_path_basename="$(echo ${1##*/})"
-output_folder="$(date +%Y-%m-%d-%H-%M-%S)_${input_path_basename%.*}"
-docker cp "$(docker ps -lq):/root/face_recognition/examples/output.avi" "$output_folder"
+output_folder="$script_dir/outputs/$(date +%Y-%m-%d-%H-%M-%S)_${input_path_basename%.*}"
+docker cp "$(docker ps -lq):/root/face_recognition/examples/face_recognized.avi" "$output_folder"
+docker cp "$(docker ps -lq):/root/face_recognition/examples/deidentification.avi" "$output_folder"

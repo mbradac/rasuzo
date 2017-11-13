@@ -25,7 +25,10 @@ logger.info("Input video width={}, height={}, fps={}, number_of_frames={}"
 
 # Create an output movie file (make sure resolution/frame rate matches input video!)
 fourcc = cv2.VideoWriter_fourcc(*'XVID')
-output_movie = cv2.VideoWriter("output.avi", fourcc, fps, (width, height))
+face_recognized_movie = cv2.VideoWriter(
+        "face_recognized.avi", fourcc, fps, (width, height))
+deidentification_movie = cv2.VideoWriter(
+        "deidentification.avi", fourcc, fps, (width, height))
 
 # Load database of faces
 database_face_encodings = []
@@ -53,15 +56,15 @@ model = LogisticRegression(max_iter=2000, tol=0.0001, C=0.01**-1).fit(
 
 while True:
     # Grab a single frame of video
-    ret, frame = input_movie.read()
-    frame_number += 1
-
+    ret, frame1 = input_movie.read()
     # Quit when the input video file ends
     if not ret: break
+    frame2 = frame1.copy()
+    frame_number += 1
 
     # Find all the faces and face encodings in the current frame of video
-    face_locations = face_recognition.face_locations(frame)
-    face_encodings = face_recognition.face_encodings(frame, face_locations)
+    face_locations = face_recognition.face_locations(frame1)
+    face_encodings = face_recognition.face_encodings(frame1, face_locations)
 
     for face_location, face_encoding in zip(face_locations, face_encodings):
         # Find best match
@@ -69,16 +72,20 @@ while True:
         label, confidence = max(enumerate(confidences), key=lambda x: x[1])
         # Draw rectangle for matched face
         (top, right, bottom, left) = face_location
-        cv2.rectangle(frame, (left, top), (right, bottom), (0, 0, 255), 2)
+        cv2.rectangle(frame1, (left, top), (right, bottom), (0, 0, 255), 2)
         # Draw rectangle for person's name if recognized
         if confidence > THRESHOLD:
              font = cv2.FONT_HERSHEY_DUPLEX
-             cv2.putText(frame, database_persons[label],
+             cv2.putText(frame1, database_persons[label],
                          (left + 6, bottom - 6), font, 0.5, (255, 255, 255), 1)
+        face = frame2[top:bottom, left:right]
+        face = cv2.GaussianBlur(face, (23, 23), 30)
+        frame2[top:bottom, left:right] = face
 
     # Write the resulting image to the output video file
     logger.info("Writing frame {} / {}".format(frame_number, length))
-    output_movie.write(frame)
+    face_recognized_movie.write(frame1)
+    deidentification_movie.write(frame2)
 
 # All done!
 input_movie.release()
