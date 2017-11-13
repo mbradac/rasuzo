@@ -3,8 +3,9 @@ import cv2
 import sys
 import os
 import logging
+from sklearn.linear_model import LogisticRegression
 
-THRESHOLD = 0.7
+THRESHOLD = 0.0
 
 logging.basicConfig(level="INFO")
 logger = logging.getLogger("lab2")
@@ -29,21 +30,26 @@ output_movie = cv2.VideoWriter("output.avi", fourcc, fps, (width, height))
 # Load database of faces
 database_face_encodings = []
 database_persons = []
-for path in os.listdir(database_path):
-    person_folder_path = os.path.join(database_path, path)
+database_labels = []
+for label, person_name in enumerate(os.listdir(database_path)):
+    person_folder_path = os.path.join(database_path, person_name)
     assert os.path.isdir(person_folder_path), \
             "Children of database_path should be folders"
+    database_persons.append(person_name)
     logger.info("Found person {} in database".format(person_folder_path))
     for image_path in os.listdir(person_folder_path):
         full_image_path = os.path.join(person_folder_path, image_path)
         loaded_image = face_recognition.load_image_file(full_image_path)
         face_encoding = face_recognition.face_encodings(loaded_image)[0]
         database_face_encodings.append(face_encoding)
-        database_persons.append(person_folder_path)
+        database_labels.append(label)
         logger.info("\tFound image {} in database".format(full_image_path))
 
 face_locations = []
 frame_number = 0
+
+model = LogisticRegression(max_iter=2000, tol=0.0001, C=0.01**-1).fit(
+        database_face_encodings, database_labels)
 
 while True:
     # Grab a single frame of video
@@ -59,16 +65,15 @@ while True:
 
     for face_location, face_encoding in zip(face_locations, face_encodings):
         # Find best match
-        distances = list(face_recognition.face_distance(
-                database_face_encodings, face_encoding))
-        name, distance = max(zip(database_persons, distances), key=lambda x: x[1])
+        confidences = model.decision_function([face_encoding])[0]
+        label, confidence = max(enumerate(confidences), key=lambda x: x[1])
         # Draw rectangle for matched face
         (top, right, bottom, left) = face_location
         cv2.rectangle(frame, (left, top), (right, bottom), (0, 0, 255), 2)
         # Draw rectangle for person's name if recognized
-        if distance > THRESHOLD:
+        if confidence > THRESHOLD:
              font = cv2.FONT_HERSHEY_DUPLEX
-             cv2.putText(frame, name,
+             cv2.putText(frame, database_persons[label],
                          (left + 6, bottom - 6), font, 0.5, (255, 255, 255), 1)
 
     # Write the resulting image to the output video file
