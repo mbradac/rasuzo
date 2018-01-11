@@ -6,7 +6,9 @@ import logging
 from datetime import datetime
 from sklearn.linear_model import LogisticRegression
 
-THRESHOLD = 0.0
+MAX_NUM_INTERPOLATED_FRAMES = 60
+MATCH_CONFIDENCE_THRESHOLD = 0.0
+INTERPOLATION_MATCH_THRESHOLD_RATIO = 0.5
 
 logging.basicConfig(level="INFO")
 logger = logging.getLogger("lab2")
@@ -61,29 +63,87 @@ model = LogisticRegression(max_iter=2000, tol=0.0001, C=0.01**-1).fit(
 preprocess_duration = datetime.now() - preprocess_start_timepoint
 process_start_timepoint = datetime.now()
 
+matches = []
+
+# Find faces in each frame of video
 while True:
     # Grab a single frame of video
-    ret, frame1 = input_movie.read()
+    ret, frame = input_movie.read()
     # Quit when the input video file ends
     if not ret: break
-    frame2 = frame1.copy()
     frame_number += 1
 
     # Find all the faces and face encodings in the current frame of video
-    face_locations = face_recognition.face_locations(frame1)
-    face_encodings = face_recognition.face_encodings(frame1, face_locations)
+    face_locations = face_recognition.face_locations(frame)
+    face_encodings = face_recognition.face_encodings(frame, face_locations)
 
+    frame_matches = []
     for face_location, face_encoding in zip(face_locations, face_encodings):
         # Find best match
         confidences = model.decision_function([face_encoding])
         if confidences.ndim == 2:
             confidences = confidences[0]
         label, confidence = max(enumerate(confidences), key=lambda x: x[1])
+        frame_matches.append((face_location, label
+            if confidence > MATCH_CONFIDENCE_THRESHOLD else None))
+
+    matches.append(frame_matches)
+    logger.info("Analyzed frame {} / {}".format(frame_number, length))
+
+# Interpolate matches
+for i, frame_matches in enumerate(matches):
+    for match in frame_matches:
+        location, label = match
+        top, right, bottom, left = location
+        width, height = abs(right - left), abs(top - bottom)
+
+        def future_match_close(top2, right2, bottom2, left2):
+            if abs(top2 - top) / height > INTERPOLATION_MATCH_THRESHOLD_RATIO:
+                return False
+            if abs(bottom2 - bottom) / height > INTERPOLATION_MATCH_THRESHOLD_RATIO:
+                return False
+            if abs(left2 - left) / width > INTERPOLATION_MATCH_THRESHOLD_RATIO:
+                return False
+            if abs(right2 - right) / width > INTERPOLATION_MATCH_THRESHOLD_RATIO:
+                return False
+            return True
+
+        def find_future_match():
+            for j, future_frame_matches in enumerate(
+                    matches[i + 1 : i + MAX_NUM_INTERPOLATED_FRAMES]):
+                for k, future_match in enumerate(future_frame_matches):
+                    location2, label2 = future_match
+                    if future_match_close(*location2):
+                        return j, k, location2, label2
+
+        got = find_future_match()
+        if got is None: continue
+        j, k, location2, label2 = got
+        if label is not None and label2 is None:
+            label2 = label
+        if label is not None and label2 is not None and label != label2:
+            logger.info("Contradicting labels in frames {} and {}".format(i, j))
+        if j == 0:
+            matches[i + 1][k] = (location2, label2)
+        else:
+            def interpolate(x): return int(x[0] + (x[1] - x[0]) / (j + 1))
+            matches[i + 1].append((
+                    tuple(map(interpolate, zip(location, location2))), None))
+
+input_movie.set(cv2.CAP_PROP_POS_FRAMES, 0)
+
+for frame_matches in matches:
+    ret, frame1 = input_movie.read()
+    if not ret: break
+    frame2 = frame1.copy()
+    frame_number += 1
+
+    for face_location, label in frame_matches:
         # Draw rectangle for matched face
-        (top, right, bottom, left) = face_location
+        top, right, bottom, left = face_location
         cv2.rectangle(frame1, (left, top), (right, bottom), (0, 0, 255), 2)
         # Draw rectangle for person's name if recognized
-        if confidence > THRESHOLD:
+        if label is not None:
              font = cv2.FONT_HERSHEY_DUPLEX
              cv2.putText(frame1, database_persons[label],
                          (left + 6, bottom - 6), font, 0.5, (255, 255, 255), 1)
@@ -91,8 +151,6 @@ while True:
         face = cv2.GaussianBlur(face, (23, 23), 30)
         frame2[top:bottom, left:right] = face
 
-    # Write the resulting image to the output video file
-    logger.info("Writing frame {} / {}".format(frame_number, length))
     face_recognized_movie.write(frame1)
     deidentification_movie.write(frame2)
 
