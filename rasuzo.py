@@ -48,6 +48,7 @@ def find_scene_changes(video):
     video.set(cv2.CAP_PROP_POS_FRAMES, 0)
     duration = datetime.now() - start_time
     logger.info("Find scene changes time {}".format(duration))
+    scene_changes.append(frame_num - 1)
     return scene_changes
 
 
@@ -136,18 +137,6 @@ def interpolate_faces(matches):
                         zip(location1, location2))), label))
             interpolated_matches[frame_number2].append((location2, label))
 
-            #match_chains[chain_id].append((j, k))
-            #    if (i + MAX_NUM_INTERPOLATED_FRAMES <= len(matches) or
-            #            i + 1 == len(matches)) : continue
-            #    got = i + 1, None, location
-            #j, k, location2 = got
-#            if label is not None and label2 is None:
-#                label2 = label
-#            if label is not None and label2 is not None and label != label2:
-#                logger.info("Contradicting labels in frames {} and {}".format(i, j))
-#            if j == 0:
-#                matches[i + 1][k] = (location2, label2)
-#            else:
     return interpolated_matches
 
 
