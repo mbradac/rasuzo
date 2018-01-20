@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
-if [ "$#" -ne 2 ]; then
-    echo "Usage: ./run.sh video_file_path database_folder_path"
+if [ "$#" -lt 2 ]; then
+    echo "Usage: ./run.sh video_file_path database_folder_path additional_args"
     exit 1
 fi
 
@@ -10,7 +10,11 @@ docker build -t video_face_recognition ${script_dir}
 
 video=$(readlink -f "$1")
 database=$(readlink -f "$2")
-docker run -v "$video:/video" -v "$database:/database" video_face_recognition
+if [[ ! -z $3 ]]; then
+  docker run -v "$video:/video" -v "$database:/database" video_face_recognition "$3"
+else
+  docker run -v "$video:/video" -v "$database:/database" video_face_recognition
+fi
 
 input_path_basename="$(echo ${1##*/})"
 output_folder="$script_dir/outputs/$(date +%Y-%m-%d-%H-%M-%S)_${input_path_basename%.*}"
