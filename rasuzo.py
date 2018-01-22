@@ -7,6 +7,7 @@ from datetime import datetime
 from argparse import ArgumentParser
 from collections import Counter
 from sklearn.linear_model import LogisticRegression
+import numpy as np
 
 MAX_NUM_INTERPOLATED_FRAMES = 200
 MATCH_CONFIDENCE_THRESHOLD = 0.0
@@ -15,6 +16,8 @@ NORM_RATIO_THRESHOLD = 9.0
 NORM_THRESHOLD = 10000
 CHAIN_LENGTH_THRESHOLD = 10
 INTERPOLATE_TO_BOUNDARY_THRESHOLD = 100
+OVERLAP_RATIO_THRESHOLD = 0.05
+SIGMA_COEF = 0.1
 
 logging.basicConfig(level="INFO")
 logger = logging.getLogger("lab2")
@@ -107,7 +110,8 @@ def interpolate_faces(matches):
     for chain in match_chains:
         frame_number0, location0, label0 = chain[0]
         frame_numbern, locationn, labeln = chain[-1]
-        if frame_numbern - frame_number0 < CHAIN_LENGTH_THRESHOLD: continue
+        if frame_numbern - frame_number0 < CHAIN_LENGTH_THRESHOLD and \
+                len(matches) >= CHAIN_LENGTH_THRESHOLD: continue
         if frame_number0 < INTERPOLATE_TO_BOUNDARY_THRESHOLD:
             frame_number0, label0 = 0, None
             chain.insert(0, (frame_number0, location0, label0))
@@ -137,6 +141,37 @@ def interpolate_faces(matches):
                         zip(location1, location2))), label))
             interpolated_matches[frame_number2].append((location2, label))
 
+    for i, frame_matches in enumerate(interpolated_matches):
+        after_merging = []
+        while frame_matches != []:
+            merged = False
+            match1 = frame_matches.pop()
+            for j, match2 in enumerate(frame_matches):
+                location1, label1 = match1
+                location2, label2 = match2
+                min_t, min_r, min_b, min_l = \
+                        map(min, zip(location1, location2))
+                max_t, max_r, max_b, max_l = \
+                        map(max, zip(location1, location2))
+                if min_b < max_t or min_r < max_l: continue
+                overlap_width, overlap_height = max_r - min_l, max_b - min_t
+                union_width, union_height = min_r - max_l, min_b - max_t
+                if overlap_width / union_width > OVERLAP_RATIO_THRESHOLD and \
+                        overlap_height / union_height > OVERLAP_RATIO_THRESHOLD:
+                    if label1 != None and label2 != None and label1 != label2:
+                        continue
+                    label = label1 if label2 is None else label2
+                    del frame_matches[j]
+                    after_merging.append(((max_t, max_r, max_b, max_l), label))
+                    merged = True
+                    break
+            if not merged:
+                after_merging.append(match1)
+            else:
+                frame_matches += after_merging
+                after_merging = []
+        interpolated_matches[i] = after_merging
+
     return interpolated_matches
 
 
@@ -161,6 +196,8 @@ face_recognized_movie = cv2.VideoWriter(
         "face_recognized.avi", fourcc, fps, (width, height))
 deidentification_movie = cv2.VideoWriter(
         "deidentification.avi", fourcc, fps, (width, height))
+deidentification_landmarks_movie = cv2.VideoWriter(
+        "deidentification_landmarks.avi", fourcc, fps, (width, height))
 
 preprocess_start_timepoint = datetime.now()
 
@@ -235,7 +272,16 @@ for frame_matches in matches:
     ret, frame1 = input_movie.read()
     if not ret: break
     frame2 = frame1.copy()
+    frame3 = frame1.copy()
     frame_number += 1
+
+    landmarks = face_recognition.face_landmarks(frame1)
+    for landmark in landmarks:
+        landmark.pop("chin", None)
+        landmark = list(landmark.values())
+        cntrs = list(map(lambda x: \
+                    np.array(x).reshape((-1, 1, 2)).astype(np.int32), landmark))
+        cv2.drawContours(frame3, cntrs, -1, (255, 255, 255), -1)
 
     for face_location, label in frame_matches:
         # Draw rectangle for matched face
@@ -247,11 +293,14 @@ for frame_matches in matches:
              cv2.putText(frame1, database_persons[label],
                          (left + 6, bottom - 6), font, 0.5, (255, 255, 255), 1)
         face = frame2[top:bottom, left:right]
-        face = cv2.GaussianBlur(face, (23, 23), 30)
+        sigma_x = int((right - left) * SIGMA_COEF) | 1
+        sigma_y = int((bottom - top) * SIGMA_COEF) | 1
+        face = cv2.GaussianBlur(face, (sigma_x, sigma_y), 30)
         frame2[top:bottom, left:right] = face
 
     face_recognized_movie.write(frame1)
     deidentification_movie.write(frame2)
+    deidentification_landmarks_movie.write(frame3)
 
 process_duration = datetime.now() - process_start_timepoint
 logger.info("Preprocess time: {}".format(preprocess_duration))
